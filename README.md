@@ -1,69 +1,72 @@
-# Jersey Color Conflict Rules
+﻿# Jersey Color Conflict Rules
 
-本文件是給 IT 參考的交接說明，僅聚焦於「色彩是否衝突」的判斷方式。內容包含：概念流程、判斷方法，以及實際使用中的 JavaScript 函式。
-
----
-
-## 1. 判斷流程概覽
-1. 將兩個色碼轉成多種色彩指標（DeltaE、對比、亮度差、色相差、飽和差）。
-2. 根據指標動態調整 DeltaE 與對比的門檻，使得「亮度很接近」或「色相極相似」的組合需要更高差異才不算衝突。
-3. 進行診斷：檢查 DeltaE 是否低於門檻，對比是否不足，色相/飽和是否過近，亮度是否過近。
-4. 最終條件：必須同時滿足 `DeltaE 低於門檻` 且 `支援訊號 >= 2` 才算衝突；其中支援訊號來自對比不足、(色相 && 飽和) 同時接近、亮度過近。
+This document is the IT handover guide for determining whether two jersey kits clash. It covers the high-level concept, the decision rules, and the JavaScript utilities you can reuse.
 
 ---
 
-## 2. 指標與方法
+## 1. Evaluation Flow Overview
+1. Convert the two hex codes into multiple color metrics (DeltaE, contrast, luminance difference, hue difference, saturation difference).
+2. Dynamically adjust the DeltaE/contrast thresholds based on those metrics so that very similar hues or luminance levels require a larger gap before we consider them safe.
+3. Diagnose each pair: check whether DeltaE is below the threshold, contrast is insufficient, hue/saturation are too close, or luminance is nearly identical.
+4. Final rule: treat it as a conflict only when `DeltaE < dynamic threshold` **and** at least two supporting signals (contrast breach, hue & saturation both tight, luminance breach) are present.
 
-| 指標 | 計算方式 |
+---
+
+## 2. Metrics & Methods
+
+| Metric | Description |
 | --- | --- |
-| `deltaE` | 使用 DeltaE00（LAB 色差）衡量顏色距離。 |
-| `contrastRatio` | 依 WCAG 公式，以相對亮度計算的對比。 |
-| `luminanceDiff` | 兩色之亮度差（0–1）。 |
-| `hueDiff` | RGB→HSL Hue 的最短圓距離（0–180°）。 |
-| `saturationDiff` | RGB→HSL Saturation 差距（0–100）。 |
+| `deltaE` | DeltaE00 (LAB) color distance. |
+| `contrastRatio` | WCAG relative luminance contrast formula. |
+| `luminanceDiff` | Difference in luminance (0–1). |
+| `hueDiff` | Shortest circular distance between HSL hues (0–180°). |
+| `saturationDiff` | Absolute difference in HSL saturation (0–100). |
 
-以上指標為後續動態門檻與判斷的基礎。
-
----
-
-## 3. 動態門檻規則
-
-### DeltaE 門檻調整
-- **高飽和度分裂**：若 `hueDiff < 12°` 且 `saturationDiff ≥ 60`，亮度 boost 固定 +6。
-- **亮度極接近但 hue ≥ 10°**：`luminanceDiff < 0.05` 且 `hueDiff ≥ 10°` 時，設定 boost = 6。
-- **一般亮度條件**：
-  - `luminanceDiff < 0.1`：在非特殊情況下，`hueDiff < 20°` 加 +10，否則 +6。
-  - `luminanceDiff < 0.25` 且 `hueDiff < 28°`：+6。
-  - `luminanceDiff < 0.4`：+3。
-- 最終 DeltaE 門檻 = `deltaE_threshold（預設 15） + boost`。
-
-### Contrast 門檻調整
-- `hueDiff < 25°` 且 `saturationDiff < 15` → 對比門檻 +0.5。
-- `hueDiff ≥ 35°` 且 `saturationDiff ≥ 40` → 對比門檻 −0.7（但最低不低於 1.5）。
+These metrics feed both the dynamic thresholds and the final verdict.
 
 ---
 
-## 4. 衝突判斷原則
-1. **DeltaE 觸犯 (deltaEBreach)**：`deltaE < 動態 DeltaE 門檻`。
-2. **對比觸犯 (contrastBreach)**：`contrastRatio < 動態對比門檻`。
-3. **色相/飽和觸犯 (hueBreach, saturationBreach)**：`hueDiff <= 25°`、`saturationDiff <= 15`。
-4. **亮度觸犯 (luminanceBreach)**：
-   - `luminanceDiff < 0.2`，但若符合以下任一條件則不計：  
-     a) 高飽和度分裂 (`hueDiff < 12°` 且 `saturationDiff ≥ 60`)  
-     b) 色相分離 (`hueDiff ≥ 28°`)  
-     c) 亮度保護 (`luminanceDiff < 0.05` 且 `hueDiff ≥ 10°`)
-5. **支援訊號 (supportingSignals)**：計數 `contrastBreach`、`hueBreach && saturationBreach`、`luminanceBreach` 為 true 的個數。
-6. **最終判定**：`deltaEBreach && supportingSignals >= 2` → 視為衝突；反之通過。
+## 3. Dynamic Threshold Rules
 
+### DeltaE boosts
+- **High-saturation split**: `hueDiff < 12°` and `saturationDiff ≥ 60` → always +6.
+- **Near-identical luminance, hue ≥ 10°**: `luminanceDiff < 0.05` and `hueDiff ≥ 10°` → set boost = 6.
+- **General cases**:
+  - `luminanceDiff < 0.1`: +10 if `hueDiff < 20°`, otherwise +6.
+  - `luminanceDiff < 0.25` and `hueDiff < 28°`: +6.
+  - `luminanceDiff < 0.4`: +3.
+- Final DeltaE threshold = `deltaE_threshold (default 15)` + boost.
 
-## 5. 參考實作（JavaScript）
-請參考conflictDetect.js
+### Contrast adjustments
+- `hueDiff < 25°` and `saturationDiff < 15` → contrast threshold +0.5.
+- `hueDiff ≥ 35°` and `saturationDiff ≥ 40` → contrast threshold −0.7 (but never below 1.5).
 
-## 6. 核心函式與使用方式
+---
 
-IT 只要匯入 `conflictDetect.js` 即可直接取得結果。
+## 4. Conflict Rules
+1. **DeltaE breach**: `deltaE < dynamic DeltaE threshold`.
+2. **Contrast breach**: `contrastRatio < dynamic contrast threshold`.
+3. **Hue / saturation breach**: `hueDiff <= 25°` and `saturationDiff <= 15`.
+4. **Luminance breach**:
+   - `luminanceDiff < 0.2`, unless  
+     a) high-saturation split (`hueDiff < 12°` and `saturationDiff ≥ 60`)  
+     b) hue-separated (`hueDiff ≥ 28°`)  
+     c) luminance-protected (`luminanceDiff < 0.05` and `hueDiff ≥ 10°`)
+5. **Supporting signals**: count how many of the following are true: contrast breach, (hue breach & saturation breach), luminance breach.
+6. **Final decision**: conflict if `deltaEBreach` is true **and** supporting signals ≥ 2; otherwise pass.
 
-### 6.1 快速上手範例（IT 請統一使用 `analyzeColors`）
+---
+
+## 5. Reference Implementation
+See `conflictDetect.js` for the production-ready functions.
+
+---
+
+## 6. Core Functions & Usage
+
+IT only needs to import `conflictDetect.js` to reuse the logic.
+
+### 6.1 Quick Start (IT must call `analyzeColors`)
 ```js
 import { analyzeColors } from "./conflictDetect.js";
 
@@ -75,52 +78,50 @@ const payload = {
 const summary = analyzeColors(payload);
 
 if (summary.status === "ok") {
-  console.log("可使用組合:", summary.team1KitUsed, summary.team2KitUsed);
-  // IT 要求：直接依照 summary.team1KitUsed / summary.team2KitUsed 安排本場比賽的 kit
+  console.log("Usable kits:", summary.team1KitUsed, summary.team2KitUsed);
+  // IT rule: schedule kits exactly as summary.team1KitUsed / summary.team2KitUsed
 } else if (summary.status === "conflict") {
-  console.log("仍衝突，請勿安排任何 kit，並檢視 checks:", summary.checks);
+  console.log("Still clashing — show no kit and review checks:", summary.checks);
 } else {
   console.error(summary.error);
 }
 ```
 
-### 6.2 IT 作業指引
+### 6.2 IT Operating Guidelines
+1. **Kit decision**  
+   - If `summary.status === "ok"`, *immediately* use `summary.team1KitUsed` and `summary.team2KitUsed` (value is always `homekit`, `awaykit`, or `thirdkit`) for that match.  
+   - If `summary.status === "conflict"` or `summary` is null/undefined, **do not** display any kit for the match.
+2. **Color source**  
+   - Feed the `base` color from the Competitor Profile API into each `homekit` / `awaykit` / `thirdkit` field for both teams.  
+   - Example: `team1: { homekit: "#ebeef0", awaykit: "#7f7f7f" }` means those are exactly the base colors returned by the API; team2 follows the same rule.
 
-1. **Kit 決策**  
-   - 當 `summary.status === "ok"` 時，請直接依 `summary.team1KitUsed`、`summary.team2KitUsed`（只會是 `homekit` / `awaykit` / `thirdkit`）安排本場比賽的球衣套件。  
-   - 當 `summary.status === "conflict"` 或 `summary` 為 `null` / 未定義時，請勿顯示任何 kit，該場比賽不要顯示球衣。
-2. **顏色輸入來源**  
-   - `team1`、`team2` 的 `homekit` / `awaykit` / `thirdkit` 欄位，請直接填入 Competitor Profile API 回傳的對應 kit `base` 顏色。  
-   - 例如：`team1: { homekit: "#ebeef0", awaykit: "#7f7f7f" }` 代表 homekit 的 base 為 `#ebeef0`、awaykit 的 base 為 `#7f7f7f`；team2 亦相同。
 ---
- 
 
-### 6.3 輸入 JSON（建議格式）
+### 6.3 Recommended Input JSON
 ```jsonc
 {
   "team1": {
-    "homekit": "#112233",        // Team1 home base
-    "awaykit": "#445566",        // Team1 away base
-    "thirdkit": "#778899"        // Team1 third base
+    "homekit": "#112233",        // Team 1 home base
+    "awaykit": "#445566",        // Team 1 away base
+    "thirdkit": "#778899"        // Team 1 third base
   },
   "team2": {
-    "homekit": "#aa0000",        // Team2 home base
-    "awaykit": "#bb2222",        // Team2 away base
-    "thirdkit": "#cc4444"        // Team2 third base
+    "homekit": "#aa0000",        // Team 2 home base
+    "awaykit": "#bb2222",        // Team 2 away base
+    "thirdkit": "#cc4444"        // Team 2 third base
   },
-  "deltaE_threshold": 15,        // 選填：不提供則預設 15
-  "contrast_threshold": 2.5      // 選填：不提供則預設 2.5
+  "deltaE_threshold": 15,        // optional, default 15
+  "contrast_threshold": 2.5      // optional, default 2.5
 }
 ```
 
-欄位說明：
-- `team1.homekit` 與 `team2.homekit` 必須是 6 碼 HEX（可含 `#`）。
-- `awaykit`、`thirdkit` 代表不同套件的優先順序：系統會依序嘗試 `team2.homekit → team2.awaykit → team2.thirdkit`，如仍衝突才嘗試 `team1` 的備用套件。
-- 客製門檻主要用於測試；若值偏離預設，記得同步告知設計/規範負責人。
-- **顏色來源要求**：輸入的各 kit 值（`homekit`、`awaykit`、`thirdkit`）請直接使用 Competitor Profile API 回傳的該 kit `base` 顏色。
+Notes:
+- `team1.homekit` and `team2.homekit` must be six-digit hex strings (optional `#`).
+- `awaykit` / `thirdkit` reflect priority order: the system tests `team2.homekit → team2.awaykit → team2.thirdkit`, then falls back to team1 alternates if needed.
+- Threshold overrides are for testing; notify the design/standards owner before changing them.
+- **Color-source requirement**: always pass the Competitor Profile API’s kit `base` colors into these fields.
 
-### 6.4 結果格式（成功案例）
-使用 `analyzeColors`時，成功的結果結構如下：
+### 6.4 Successful Response Shape (`analyzeColors`)
 ```json
 {
   "status": "ok",
@@ -153,81 +154,78 @@ if (summary.status === "ok") {
       "base": { "label": "team1", "kit": "homekit", "color": "#112233" },
       "compare": { "label": "team2", "kit": "homekit", "color": "#aa0000" },
       "conflict": true,
-      "metrics": { "...": "略" },
-      "thresholds": { "...": "略" },
-      "diagnostics": { "...": "略" }
+      "metrics": { "...": "omitted" },
+      "thresholds": { "...": "omitted" },
+      "diagnostics": { "...": "omitted" }
     },
     {
       "stage": "team1-homekit",
       "base": { "label": "team1", "kit": "homekit", "color": "#112233" },
       "compare": { "label": "team2", "kit": "awaykit", "color": "#bb2222" },
       "conflict": false,
-      "metrics": { "...": "略" },
-      "thresholds": { "...": "略" },
-      "diagnostics": { "...": "略" }
+      "metrics": { "...": "omitted" },
+      "thresholds": { "...": "omitted" },
+      "diagnostics": { "...": "omitted" }
     }
   ]
 }
 ```
-重要欄位：
-- 進階使用者若直接呼叫 `findNonConflictingColors`，會拿到 `{ result, metricsLog }`；其中 `result` 的欄位與上例相同，但不包含 `status/message`。
-- `team1Color` / `team2Color`：最終建議使用的配色。
-- `team1KitUsed` / `team2KitUsed`：成功避開衝突時，分別說明 team1、team2 最終使用哪一套 kit（`homekit` / `awaykit` / `thirdkit`，與輸入欄位一致）。
-- `checks`：每次嘗試的詳細紀錄，可用於偵錯、稽核或提供 PM 參考。
-- `diagnostics`：命中哪些規則（對比不足、亮度過近等），方便判讀衝突原因。
-- `checks[].base.kit` / `checks[].compare.kit`：就算判定結果為衝突，也會明確指出每次比較時 team1、team2 實際用的是哪一套 kit，名稱與輸入 JSON 保持一致。
 
-若所有組合都衝突，`result` 會是 `null`（或 `status = "conflict"`），`message` 會提示需要人工調整；`checks` 依然會列出全部嘗試，方便追蹤。
+Key fields:
+- Advanced users calling `findNonConflictingColors` receive `{ result, metricsLog }`; `result` matches the block above but lacks `status/message`.
+- `team1Color` / `team2Color`: final recommended colors.
+- `team1KitUsed` / `team2KitUsed`: chosen kits (`homekit`, `awaykit`, `thirdkit`).
+- `checks`: detailed log of every attempt for debugging/audits.
+- `diagnostics`: which rules triggered (contrast, hue/saturation, luminance).
+- `checks[].base.kit` / `checks[].compare.kit`: explicitly records which kit combo was evaluated.
+
+If every combination clashes, `status` becomes `"conflict"` (or `result` is `null` when using `findNonConflictingColors`), and `checks` still lists all attempts for troubleshooting.
 
 ---
 
-## 7. 範例
+## 7. Examples
 
-### 7.1 亮灰 vs. 螢光藍
+### 7.1 Light Gray vs. Neon Cyan
 ```json
 {
   "team1": { "homekit": "#ebeef0" },
   "team2": { "homekit": "#e4e4d9", "awaykit": "#00fffa" }
 }
 ```
-- `team1-homekit` vs `team2-awaykit (#00fffa)`：`deltaE = 24.24`、`contrast = 1.08`、`hueDiff = 25°`。  
-  動態 DeltaE 門檻降至 21 (`deltaEBreach = false`)，雖然對比偏低，但支援訊號僅 1 個 → **判定不衝突**，並回報 `team2KitUsed = awaykit`。
+`team1-homekit` vs `team2-awaykit (#00fffa)`: `deltaE = 24.24`, `contrast = 1.08`, `hueDiff = 25°`.  
+Dynamic DeltaE threshold drops to 21 (`deltaEBreach = false`). Contrast is low but has only one supporting signal → **no conflict**, `team2KitUsed = awaykit`.
 
-### 7.2 深綠 vs. 螢光綠
+### 7.2 Dark Green vs. Neon Green
 ```json
 {
   "team1": { "homekit": "#586a58" },
   "team2": { "homekit": "#648b7d", "awaykit": "#238113" }
 }
 ```
-- `team1-homekit` vs `team2-homekit (#648b7d)`：`deltaE = 13.49`、`contrast = 1.53`、`luminanceDiff = 0.096`。  
-  DeltaE 門檻為 21（亮度 boost），`deltaE` 仍偏低且對比/亮度同時告警 → **判定衝突**。  
-- `team1-homekit` vs `team2-awaykit (#238113)`：因屬於「飽和差 65、亮度極近但 hue 9°」的情況，亮度訊號被抑制，支援訊號只有對比一項 → **判定不衝突**，並回報 `team2KitUsed = awaykit`。
+`team1-homekit` vs `team2-homekit`: `deltaE = 13.49`, `contrast = 1.53`, `luminanceDiff = 0.096`.  
+Boosted DeltaE threshold is 21, so this pairing **conflicts**.  
+`team1-homekit` vs `team2-awaykit (#238113)`: high saturation gap (65) and slight hue diff (9°) suppress the luminance signal, leaving only contrast → **no conflict**, `team2KitUsed = awaykit`.
 
-
-### 7.3 全部組合皆衝突
+### 7.3 All Combinations Clash
 ```json
 {
   "team1": { "homekit": "#1a1a1a", "awaykit": "#2a2a2a" },
   "team2": { "homekit": "#151515", "awaykit": "#202020" }
 }
 ```
-- `team1-homekit`/`team2-homekit` 亮度差僅 0.01、`deltaE = 4.12`，支援訊號（對比 + 亮度）同時成立 → **衝突**。  
-- 改試 `team2.awaykit` 仍僅是亮度微調，`deltaE = 5.35`、對比不足 → **衝突**。  
-- `team1` 改用 `awaykit` 嘗試所有 `team2` kit 仍無法通過，最終回應範例：
-
+`team1-homekit` vs `team2-homekit`: luminance diff 0.01, `deltaE = 4.12`, multiple supporting signals → **conflict**.  
+Switching `team2.awaykit` only nudges luminance (`deltaE = 5.35`) → still **conflict**.  
+Trying team1’s away kit doesn’t help, so the final response is:
 ```json
 {
   "status": "conflict",
   "message": "All combinations still clash. Please review or adjust colors",
   "checks": [
-    { "stage": "team1-homekit", "base": { "kit": "homekit", "color": "#1a1a1a" }, "compare": { "kit": "homekit", "color": "#151515" }, "conflict": true, "diagnostics": { "...": "略" } },
-    { "stage": "team1-homekit", "base": { "kit": "homekit", "color": "#1a1a1a" }, "compare": { "kit": "awaykit", "color": "#202020" }, "conflict": true, "diagnostics": { "...": "略" } },
-    { "stage": "team1-alternate", "base": { "kit": "awaykit", "color": "#2a2a2a" }, "compare": { "kit": "homekit", "color": "#151515" }, "conflict": true, "diagnostics": { "...": "略" } },
-    { "stage": "team1-alternate", "base": { "kit": "awaykit", "color": "#2a2a2a" }, "compare": { "kit": "awaykit", "color": "#202020" }, "conflict": true, "diagnostics": { "...": "略" } }
+    { "stage": "team1-homekit", "base": { "kit": "homekit", "color": "#1a1a1a" }, "compare": { "kit": "homekit", "color": "#151515" }, "conflict": true },
+    { "stage": "team1-homekit", "base": { "kit": "homekit", "color": "#1a1a1a" }, "compare": { "kit": "awaykit", "color": "#202020" }, "conflict": true },
+    { "stage": "team1-alternate", "base": { "kit": "awaykit", "color": "#2a2a2a" }, "compare": { "kit": "homekit", "color": "#151515" }, "conflict": true },
+    { "stage": "team1-alternate", "base": { "kit": "awaykit", "color": "#2a2a2a" }, "compare": { "kit": "awaykit", "color": "#202020" }, "conflict": true }
   ]
 }
 ```
-- `checks` 陣列能清楚指出每次嘗試都衝突，方便追蹤需要調整的 kit。
-
-藉由觀察 `checks` 陣列中的 `metrics` 與 `diagnostics`，即可解讀每次判斷是被哪些規則拒絕或放行。
+Review the `checks` array to decide which kit colors need adjustment.
