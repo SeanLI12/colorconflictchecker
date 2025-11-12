@@ -175,3 +175,50 @@ function isConflict(hex1, hex2, deltaE_threshold = 15, contrast_threshold = 2.5)
 ```
 
 IT 只需依序呼叫 `computeColorMetrics → deriveDynamicThresholds → isConflict` 即可獲得完整的判斷結果與診斷資訊。
+
+---
+
+## 6. 範例結果說明
+以下列出幾筆常見測試案例，展示 `isConflict` 的輸出涵義：
+
+### 6.1 亮灰 vs. 螢光藍
+```json
+{
+  "home": { "primary": "#ebeef0" },
+  "away": { "primary": "#e4e4d9", "secondary": "#00fffa" }
+}
+```
+- `home-primary` vs `away-secondary (#00fffa)`：`deltaE = 24.24`、`contrast = 1.08`、`hueDiff = 25°`。  
+  動態 DeltaE 門檻降至 21 (`deltaEBreach = false`)，雖然對比偏低，但支援訊號僅 1 個 → **判定不衝突**。
+
+### 6.2 深綠 vs. 螢光綠
+```json
+{
+  "home": { "primary": "#586a58" },
+  "away": { "primary": "#648b7d", "secondary": "#238113" }
+}
+```
+- `home-primary` vs `away-primary (#648b7d)`：`deltaE = 13.49`、`contrast = 1.53`、`luminanceDiff = 0.096`。  
+  DeltaE 門檻為 21（亮度 boost），`deltaE` 仍偏低且對比/亮度同時告警 → **判定衝突**。  
+- `home-primary` vs `away-secondary (#238113)`：因屬於「飽和差 65、亮度極近但 hue 9°」的情況，亮度訊號被抑制，支援訊號只有對比一項 → **判定不衝突**。
+
+### 6.3 亮黃 vs. 青綠
+```json
+{
+  "home": { "primary": "#ffff00" },
+  "away": { "primary": "#99ff33", "secondary": "#99ff33" }
+}
+```
+- hue 差 30°，亮度差 0.142 → DeltaE 門檻 18。`deltaE = 16.55 < 18`，但亮度訊號因 hue 差大而被關閉，支援訊號僅對比一項 → **判定不衝突**。
+
+### 6.4 紅 vs. 橘
+```json
+{
+  "home": { "primary": "#ff3300" },
+  "away": { "primary": "#d86518", "secondary": "#d86518" }
+}
+```
+- hue 差 12°、亮度差 0.003 → DeltaE 門檻 23，`deltaE = 11.34`。  
+  由於「亮度極近但 hue ≥ 10°」觸發保護，`luminanceBreach = false`，支援訊號只有對比 → **判定不衝突**。
+
+藉由觀察 `checks` 陣列中的 `metrics` 與 `diagnostics`，即可解讀每次判斷是被哪些規則拒絕或放行。
