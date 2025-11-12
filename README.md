@@ -1,104 +1,71 @@
-// ===== Jersey Color Checker — Lambda proxy handler (Node 22 ready) =====
+# Jersey Color Conflict Rules
 
+本文件是給 IT 參考的交接說明，僅聚焦於「色彩是否衝突」的判斷方式。內容包含：概念流程、判斷方法，以及實際使用中的 JavaScript 函式。
+
+---
+
+## 1. 判斷流程概覽
+1. 將兩個色碼轉成多種色彩指標（DeltaE、對比、亮度差、色相差、飽和差）。
+2. 根據指標動態調整 DeltaE 與對比的門檻，使得「亮度很接近」或「色相極相似」的組合需要更高差異才不算衝突。
+3. 進行診斷：檢查 DeltaE 是否低於門檻，對比是否不足，色相/飽和是否過近，亮度是否過近。
+4. 最終條件：必須同時滿足 `DeltaE 低於門檻` 且 `支援訊號 >= 2` 才算衝突；其中支援訊號來自對比不足、(色相 && 飽和) 同時接近、亮度過近。
+
+---
+
+## 2. 指標與方法
+
+| 指標 | 計算方式 |
+| --- | --- |
+| `deltaE` | 使用 DeltaE00（LAB 色差）衡量顏色距離。 |
+| `contrastRatio` | 依 WCAG 公式，以相對亮度計算的對比。 |
+| `luminanceDiff` | 兩色之亮度差（0–1）。 |
+| `hueDiff` | RGB→HSL Hue 的最短圓距離（0–180°）。 |
+| `saturationDiff` | RGB→HSL Saturation 差距（0–100）。 |
+
+以上指標為後續動態門檻與判斷的基礎。
+
+---
+
+## 3. 動態門檻規則
+
+### DeltaE 門檻調整
+- **高飽和度分裂**：若 `hueDiff < 12°` 且 `saturationDiff ≥ 60`，亮度 boost 固定 +6。
+- **亮度極接近但 hue ≥ 10°**：`luminanceDiff < 0.05` 且 `hueDiff ≥ 10°` 時，設定 boost = 6。
+- **一般亮度條件**：
+  - `luminanceDiff < 0.1`：在非特殊情況下，`hueDiff < 20°` 加 +10，否則 +6。
+  - `luminanceDiff < 0.25` 且 `hueDiff < 28°`：+6。
+  - `luminanceDiff < 0.4`：+3。
+- 最終 DeltaE 門檻 = `deltaE_threshold（預設 15） + boost`。
+
+### Contrast 門檻調整
+- `hueDiff < 25°` 且 `saturationDiff < 15` → 對比門檻 +0.5。
+- `hueDiff ≥ 35°` 且 `saturationDiff ≥ 40` → 對比門檻 −0.7（但最低不低於 1.5）。
+
+---
+
+## 4. 衝突判斷原則
+1. **DeltaE 觸犯 (deltaEBreach)**：`deltaE < 動態 DeltaE 門檻`。
+2. **對比觸犯 (contrastBreach)**：`contrastRatio < 動態對比門檻`。
+3. **色相/飽和觸犯 (hueBreach, saturationBreach)**：`hueDiff <= 25°`、`saturationDiff <= 15`。
+4. **亮度觸犯 (luminanceBreach)**：
+   - `luminanceDiff < 0.2`，但若符合以下任一條件則不計：  
+     a) 高飽和度分裂 (`hueDiff < 12°` 且 `saturationDiff ≥ 60`)  
+     b) 色相分離 (`hueDiff ≥ 28°`)  
+     c) 亮度保護 (`luminanceDiff < 0.05` 且 `hueDiff ≥ 10°`)
+5. **支援訊號 (supportingSignals)**：計數 `contrastBreach`、`hueBreach && saturationBreach`、`luminanceBreach` 為 true 的個數。
+6. **最終判定**：`deltaEBreach && supportingSignals >= 2` → 視為衝突；反之通過。
+
+---
+
+## 5. 參考實作（JavaScript）
+以下程式碼節錄自 `index.mjs`，IT 可直接複製使用。
+
+```js
 import DeltaE from "delta-e";
 import convert from "color-convert";
 
-const defaultHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-const healthMessage = "Jersey Color Checker API is running ✅\nUse POST /analyze to test colors.";
-
-function buildResponse(statusCode, payload, extraHeaders = {}) {
-  const isString = typeof payload === "string";
-  return {
-    statusCode,
-    headers: {
-      ...defaultHeaders,
-      "Content-Type": isString ? "text/plain; charset=utf-8" : "application/json; charset=utf-8",
-      ...extraHeaders,
-    },
-    body: isString ? payload : JSON.stringify(payload),
-  };
-}
-
-function parseJsonBody(event) {
-  if (!event?.body) {
-    return {};
-  }
-  const decoded = event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
-  try {
-    return JSON.parse(decoded);
-  } catch {
-    throw new Error("INVALID_JSON");
-  }
-}
-
-function getMethod(event) {
-  return event?.httpMethod || event?.requestContext?.http?.method || "GET";
-}
-
-function normalizePath(path, stage) {
-  if (!path) return "/";
-  if (!stage) return path;
-  const prefix = `/${stage}`;
-  if (path === prefix) return "/";
-  return path.startsWith(prefix) ? path.slice(prefix.length) || "/" : path;
-}
-
-function sanitizePath(path) {
-  if (!path) return "/";
-  let next = path.startsWith("/") ? path : `/${path}`;
-  next = next.replace(/\/+$/, "");
-  return next === "" ? "/" : next;
-}
-
-function resolvePaths(event) {
-  const stage =
-    event?.requestContext?.stage ||
-    event?.requestContext?.http?.stage ||
-    event?.stageVariables?.stage;
-  const rawPath = event?.rawPath || event?.path || "/";
-  const normalizedPath = sanitizePath(normalizePath(rawPath, stage));
-  let resource = event?.resource && !event.resource.includes("{") ? sanitizePath(event.resource) : null;
-  if (resource) {
-    resource = sanitizePath(normalizePath(resource, stage));
-  }
-  const direct = resource || normalizedPath;
-  const segments = direct === "/" ? [] : direct.split("/").filter(Boolean);
-  const withoutBase = segments.length > 0 ? `/${segments.slice(1).join("/")}` || "/" : "/";
-  return {
-    direct,
-    withoutBase,
-  };
-}
-
-// ---------- Color conversion & analysis ----------
 const HUE_SIMILARITY_DEG = 25;
-const SATURATION_SIMILARITY = 15; // percentage points (0-100 scale)
-
-function createMetricsEntry(stage, baseLabel, baseColor, compareLabel, compareColor, evaluation) {
-  const { metrics, thresholds, diagnostics, conflict } = evaluation;
-  return {
-    stage,
-    base: { label: baseLabel, color: baseColor },
-    compare: { label: compareLabel, color: compareColor },
-    conflict,
-    metrics: {
-      deltaE: Number(metrics.deltaE.toFixed(2)),
-      contrastRatio: Number(metrics.contrastRatio.toFixed(2)),
-      hueDifference: Number(metrics.hueDiff.toFixed(2)),
-      saturationDifference: Number(metrics.saturationDiff.toFixed(2)),
-      luminanceDifference: Number(metrics.luminanceDiff.toFixed(3)),
-    },
-    thresholds: {
-      deltaE: Number(thresholds.deltaE.toFixed(2)),
-      contrastRatio: Number(thresholds.contrastRatio.toFixed(2)),
-    },
-    diagnostics,
-  };
-}
+const SATURATION_SIMILARITY = 15;
 
 function rgbToLab(rgb) {
   const lab = convert.rgb.lab(rgb);
@@ -164,10 +131,6 @@ function deriveDynamicThresholds(deltaE_threshold, contrast_threshold, metrics) 
     deltaBoost = 3;
   }
 
-  if (metrics.hueDiff < 15) {
-    deltaBoost += 2;
-  }
-
   const contrastBoost =
     metrics.hueDiff < HUE_SIMILARITY_DEG && metrics.saturationDiff < SATURATION_SIMILARITY ? 0.5 : 0;
   const contrastRelief =
@@ -193,7 +156,6 @@ function isConflict(hex1, hex2, deltaE_threshold = 15, contrast_threshold = 2.5)
   const luminanceBreach = !highSatHueSplit && !luminanceProtected && metrics.luminanceDiff < 0.2;
 
   const supportingSignals = [contrastBreach, hueBreach && saturationBreach, luminanceBreach].filter(Boolean).length;
-
   const conflict = deltaEBreach && supportingSignals >= 2;
 
   return {
@@ -210,124 +172,6 @@ function isConflict(hex1, hex2, deltaE_threshold = 15, contrast_threshold = 2.5)
     },
   };
 }
+```
 
-function formatResult(base, alt, rule, evaluation) {
-  const { metrics, thresholds, diagnostics } = evaluation;
-  return {
-    homeColor: base,
-    awayColor: alt,
-    deltaE: Number(metrics.deltaE.toFixed(2)),
-    contrastRatio: Number(metrics.contrastRatio.toFixed(2)),
-    hueDifference: Number(metrics.hueDiff.toFixed(2)),
-    saturationDifference: Number(metrics.saturationDiff.toFixed(2)),
-    luminanceDifference: Number(metrics.luminanceDiff.toFixed(3)),
-    dynamicThresholds: {
-      deltaE: Number(thresholds.deltaE.toFixed(2)),
-      contrastRatio: Number(thresholds.contrastRatio.toFixed(2)),
-    },
-    rule,
-    diagnostics,
-  };
-}
-
-// ---------- Home-first, away-kit swap logic ----------
-function findNonConflictingColors(home, away, deltaE_threshold = 15, contrast_threshold = 2.5) {
-  const homeColor = home.primary;
-  const awaySet = [away.primary, away.secondary, away.third].filter(Boolean);
-  const metricsLog = [];
-
-  // Step 1: try every away kit in priority order
-  for (const aColor of awaySet) {
-    const evaluation = isConflict(homeColor, aColor, deltaE_threshold, contrast_threshold);
-    metricsLog.push(createMetricsEntry("home-primary", "home", homeColor, "away", aColor, evaluation));
-    if (!evaluation.conflict) {
-      return { result: formatResult(homeColor, aColor, "Away kit swapped to avoid clashes", evaluation), metricsLog };
-    }
-  }
-
-  // Step 2: if all away kits clash, try home alternates (rare)
-  const homeSet = [home.secondary, home.third].filter(Boolean);
-  for (const hColor of homeSet) {
-    for (const aColor of awaySet) {
-      const evaluation = isConflict(hColor, aColor, deltaE_threshold, contrast_threshold);
-      metricsLog.push(createMetricsEntry("home-alternate", "homeAlt", hColor, "away", aColor, evaluation));
-      if (!evaluation.conflict) {
-        return {
-          result: formatResult(hColor, aColor, "⚠️ Home kit switched to alternate (edge case)", evaluation),
-          metricsLog,
-        };
-      }
-    }
-  }
-
-  return { result: null, metricsLog };
-}
-
-function handleAnalyze(body = {}) {
-  const { home, away, deltaE_threshold, contrast_threshold } = body;
-  if (!home || !away) {
-    return buildResponse(400, { error: "Please provide both home and away color data" });
-  }
-
-  const { result, metricsLog } = findNonConflictingColors(
-    home,
-    away,
-    deltaE_threshold ?? 15,
-    contrast_threshold ?? 2.5
-  );
-
-  if (result) {
-    return buildResponse(200, {
-      status: "ok",
-      message: "Found a non-conflicting combination",
-      ...result,
-      checks: metricsLog,
-    });
-  }
-
-  return buildResponse(200, {
-    status: "conflict",
-    message: "All combinations still clash. Please review or adjust colors",
-    checks: metricsLog,
-  });
-}
-
-// ---------- Lambda entry (AWS proxy integration) ----------
-export async function handler(event) {
-  const method = getMethod(event);
-  const { direct, withoutBase } = resolvePaths(event);
-  const matches = (target) => direct === target || withoutBase === target;
-
-  if (method === "OPTIONS") {
-    return buildResponse(204, "", { "Access-Control-Allow-Methods": "GET,POST,OPTIONS" });
-  }
-
-  if (method === "GET" && matches("/")) {
-    return buildResponse(200, healthMessage);
-  }
-
-  if (method === "POST" && (matches("/analyze") || matches("/"))) {
-    try {
-      const body = parseJsonBody(event);
-      return handleAnalyze(body);
-    } catch (err) {
-      if (err.message === "INVALID_JSON") {
-        return buildResponse(400, { error: "Please provide valid JSON payload" });
-      }
-      console.error("Unexpected error during /analyze", err);
-      return buildResponse(500, { error: "Unexpected server error, please try again later" });
-    }
-  }
-  return buildResponse(404, {
-    error: "Route not found",
-    pathDebug: {
-      method,
-      direct,
-      withoutBase,
-      path: event?.path ?? null,
-      rawPath: event?.rawPath ?? null,
-      resource: event?.resource ?? null,
-      proxy: event?.pathParameters?.proxy ?? null,
-    },
-  });
-}
+IT 只需依序呼叫 `computeColorMetrics → deriveDynamicThresholds → isConflict` 即可獲得完整的判斷結果與診斷資訊。
