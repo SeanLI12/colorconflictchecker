@@ -55,170 +55,179 @@
 5. **支援訊號 (supportingSignals)**：計數 `contrastBreach`、`hueBreach && saturationBreach`、`luminanceBreach` 為 true 的個數。
 6. **最終判定**：`deltaEBreach && supportingSignals >= 2` → 視為衝突；反之通過。
 
----
 
 ## 5. 參考實作（JavaScript）
-以下程式碼節錄自 `index.mjs`，IT 可直接複製使用。
+請參考conflictDetect.js
 
+## 6. 核心函式與使用方式
+
+IT 只要匯入 `conflictDetect.js` 即可直接取得結果。
+
+### 6.1 快速上手範例（IT 請統一使用 `analyzeColors`）
 ```js
-import DeltaE from "delta-e";
-import convert from "color-convert";
+import { analyzeColors } from "./conflictDetect.js";
 
-const HUE_SIMILARITY_DEG = 25;
-const SATURATION_SIMILARITY = 15;
+const payload = {
+  team1: { homekit: "#ebeef0", awaykit: "#7f7f7f" },
+  team2: { homekit: "#e4e4d9", awaykit: "#00fffa", thirdkit: "#c52a2a" },
+};
 
-function rgbToLab(rgb) {
-  const lab = convert.rgb.lab(rgb);
-  return { L: lab[0], A: lab[1], B: lab[2] };
-}
+const summary = analyzeColors(payload);
 
-function luminance(rgb) {
-  const [r, g, b] = rgb.map((c) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function hueDifference(h1 = 0, h2 = 0) {
-  const hue1 = Number.isFinite(h1) ? h1 : 0;
-  const hue2 = Number.isFinite(h2) ? h2 : 0;
-  const diff = Math.abs(hue1 - hue2);
-  return Math.min(diff, 360 - diff);
-}
-
-function computeColorMetrics(hex1, hex2) {
-  const rgb1 = convert.hex.rgb(hex1);
-  const rgb2 = convert.hex.rgb(hex2);
-  const lab1 = rgbToLab(rgb1);
-  const lab2 = rgbToLab(rgb2);
-
-  const deltaEValue = DeltaE.getDeltaE00(lab1, lab2);
-  const L1 = luminance(rgb1);
-  const L2 = luminance(rgb2);
-  const contrastRatioValue = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
-  const luminanceDiff = Math.abs(L1 - L2);
-
-  const hsl1 = convert.rgb.hsl(rgb1);
-  const hsl2 = convert.rgb.hsl(rgb2);
-  const hueDiff = hueDifference(hsl1?.[0], hsl2?.[0]);
-  const saturationDiff = Math.abs((hsl1?.[1] ?? 0) - (hsl2?.[1] ?? 0));
-
-  return {
-    deltaE: deltaEValue,
-    contrastRatio: contrastRatioValue,
-    luminanceDiff,
-    hueDiff,
-    saturationDiff,
-  };
-}
-
-function deriveDynamicThresholds(deltaE_threshold, contrast_threshold, metrics) {
-  const highSatHueSplit = metrics.hueDiff < 12 && metrics.saturationDiff >= 60;
-  const hueSeparated = metrics.hueDiff >= 28;
-  let deltaBoost = 0;
-  if (metrics.luminanceDiff < 0.05 && metrics.hueDiff >= 10) {
-    deltaBoost = 6;
-  } else if (metrics.luminanceDiff < 0.1) {
-    if (highSatHueSplit) {
-      deltaBoost = 6;
-    } else {
-      deltaBoost = metrics.hueDiff < 20 ? 10 : 6;
-    }
-  } else if (metrics.luminanceDiff < 0.25 && !hueSeparated) {
-    deltaBoost = 6;
-  } else if (metrics.luminanceDiff < 0.4) {
-    deltaBoost = 3;
-  }
-
-  const contrastBoost =
-    metrics.hueDiff < HUE_SIMILARITY_DEG && metrics.saturationDiff < SATURATION_SIMILARITY ? 0.5 : 0;
-  const contrastRelief =
-    metrics.hueDiff >= 35 && metrics.saturationDiff >= 40 ? 0.7 : 0;
-  const adjustedContrast = Math.max(contrast_threshold + contrastBoost - contrastRelief, 1.5);
-
-  return {
-    deltaE: deltaE_threshold + deltaBoost,
-    contrastRatio: adjustedContrast,
-  };
-}
-
-function isConflict(hex1, hex2, deltaE_threshold = 15, contrast_threshold = 2.5) {
-  const metrics = computeColorMetrics(hex1, hex2);
-  const thresholds = deriveDynamicThresholds(deltaE_threshold, contrast_threshold, metrics);
-  const deltaEBreach = metrics.deltaE < thresholds.deltaE;
-  const contrastBreach = metrics.contrastRatio < thresholds.contrastRatio;
-  const hueBreach = metrics.hueDiff <= HUE_SIMILARITY_DEG;
-  const saturationBreach = metrics.saturationDiff <= SATURATION_SIMILARITY;
-  const highSatHueSplit = metrics.hueDiff < 12 && metrics.saturationDiff >= 60;
-  const hueSeparated = metrics.hueDiff >= 28;
-  const luminanceProtected = (metrics.luminanceDiff < 0.05 && metrics.hueDiff >= 10) || hueSeparated;
-  const luminanceBreach = !highSatHueSplit && !luminanceProtected && metrics.luminanceDiff < 0.2;
-
-  const supportingSignals = [contrastBreach, hueBreach && saturationBreach, luminanceBreach].filter(Boolean).length;
-  const conflict = deltaEBreach && supportingSignals >= 2;
-
-  return {
-    conflict,
-    metrics,
-    thresholds,
-    diagnostics: {
-      deltaEBreach,
-      contrastBreach,
-      hueBreach,
-      saturationBreach,
-      luminanceBreach,
-      supportingSignals,
-    },
-  };
+if (summary.status === "ok") {
+  console.log("可使用組合:", summary.team1KitUsed, summary.team2KitUsed);
+  // IT 要求：直接依照 summary.team1KitUsed / summary.team2KitUsed 安排本場比賽的 kit
+} else if (summary.status === "conflict") {
+  console.log("仍衝突，請勿安排任何 kit，並檢視 checks:", summary.checks);
+} else {
+  console.error(summary.error);
 }
 ```
 
-IT 只需依序呼叫 `computeColorMetrics → deriveDynamicThresholds → isConflict` 即可獲得完整的判斷結果與診斷資訊。
+### 6.2 IT 作業指引
+
+1. **Kit 決策**  
+   - 當 `summary.status === "ok"` 時，請直接依 `summary.team1KitUsed`、`summary.team2KitUsed`（只會是 `homekit` / `awaykit` / `thirdkit`）安排本場比賽的球衣套件。  
+   - 當 `summary.status === "conflict"` 或 `summary` 為 `null` / 未定義時，請勿顯示任何 kit，該場比賽不要顯示球衣。
+2. **顏色輸入來源**  
+   - `team1`、`team2` 的 `homekit` / `awaykit` / `thirdkit` 欄位，請直接填入 Competitor Profile API 回傳的對應 kit `base` 顏色。  
+   - 例如：`team1: { homekit: "#ebeef0", awaykit: "#7f7f7f" }` 代表 homekit 的 base 為 `#ebeef0`、awaykit 的 base 為 `#7f7f7f`；team2 亦相同。
+---
+ 
+
+### 6.3 輸入 JSON（建議格式）
+```jsonc
+{
+  "team1": {
+    "homekit": "#112233",        // Team1 home base
+    "awaykit": "#445566",        // Team1 away base
+    "thirdkit": "#778899"        // Team1 third base
+  },
+  "team2": {
+    "homekit": "#aa0000",        // Team2 home base
+    "awaykit": "#bb2222",        // Team2 away base
+    "thirdkit": "#cc4444"        // Team2 third base
+  },
+  "deltaE_threshold": 15,        // 選填：不提供則預設 15
+  "contrast_threshold": 2.5      // 選填：不提供則預設 2.5
+}
+```
+
+欄位說明：
+- `team1.homekit` 與 `team2.homekit` 必須是 6 碼 HEX（可含 `#`）。
+- `awaykit`、`thirdkit` 代表不同套件的優先順序：系統會依序嘗試 `team2.homekit → team2.awaykit → team2.thirdkit`，如仍衝突才嘗試 `team1` 的備用套件。
+- 客製門檻主要用於測試；若值偏離預設，記得同步告知設計/規範負責人。
+- **顏色來源要求**：輸入的各 kit 值（`homekit`、`awaykit`、`thirdkit`）請直接使用 Competitor Profile API 回傳的該 kit `base` 顏色。
+
+### 6.4 結果格式（成功案例）
+使用 `analyzeColors`時，成功的結果結構如下：
+```json
+{
+  "status": "ok",
+  "message": "Found a non-conflicting combination",
+  "team1Color": "#112233",
+  "team2Color": "#bb2222",
+  "team1KitUsed": "homekit",
+  "team2KitUsed": "awaykit",
+  "deltaE": 21.37,
+  "contrastRatio": 2.88,
+  "hueDifference": 34.21,
+  "saturationDifference": 18.45,
+  "luminanceDifference": 0.256,
+  "dynamicThresholds": {
+    "deltaE": 18.00,
+    "contrastRatio": 2.50
+  },
+  "rule": "Team2 kit selection avoided clashes",
+  "diagnostics": {
+    "deltaEBreach": false,
+    "contrastBreach": false,
+    "hueBreach": false,
+    "saturationBreach": false,
+    "luminanceBreach": false,
+    "supportingSignals": 0
+  },
+  "checks": [
+    {
+      "stage": "team1-homekit",
+      "base": { "label": "team1", "kit": "homekit", "color": "#112233" },
+      "compare": { "label": "team2", "kit": "homekit", "color": "#aa0000" },
+      "conflict": true,
+      "metrics": { "...": "略" },
+      "thresholds": { "...": "略" },
+      "diagnostics": { "...": "略" }
+    },
+    {
+      "stage": "team1-homekit",
+      "base": { "label": "team1", "kit": "homekit", "color": "#112233" },
+      "compare": { "label": "team2", "kit": "awaykit", "color": "#bb2222" },
+      "conflict": false,
+      "metrics": { "...": "略" },
+      "thresholds": { "...": "略" },
+      "diagnostics": { "...": "略" }
+    }
+  ]
+}
+```
+重要欄位：
+- 進階使用者若直接呼叫 `findNonConflictingColors`，會拿到 `{ result, metricsLog }`；其中 `result` 的欄位與上例相同，但不包含 `status/message`。
+- `team1Color` / `team2Color`：最終建議使用的配色。
+- `team1KitUsed` / `team2KitUsed`：成功避開衝突時，分別說明 team1、team2 最終使用哪一套 kit（`homekit` / `awaykit` / `thirdkit`，與輸入欄位一致）。
+- `checks`：每次嘗試的詳細紀錄，可用於偵錯、稽核或提供 PM 參考。
+- `diagnostics`：命中哪些規則（對比不足、亮度過近等），方便判讀衝突原因。
+- `checks[].base.kit` / `checks[].compare.kit`：就算判定結果為衝突，也會明確指出每次比較時 team1、team2 實際用的是哪一套 kit，名稱與輸入 JSON 保持一致。
+
+若所有組合都衝突，`result` 會是 `null`（或 `status = "conflict"`），`message` 會提示需要人工調整；`checks` 依然會列出全部嘗試，方便追蹤。
 
 ---
 
-## 6. 範例結果說明
-以下列出幾筆常見測試案例，展示 `isConflict` 的輸出涵義：
+## 7. 範例
 
-### 6.1 亮灰 vs. 螢光藍
+### 7.1 亮灰 vs. 螢光藍
 ```json
 {
-  "home": { "primary": "#ebeef0" },
-  "away": { "primary": "#e4e4d9", "secondary": "#00fffa" }
+  "team1": { "homekit": "#ebeef0" },
+  "team2": { "homekit": "#e4e4d9", "awaykit": "#00fffa" }
 }
 ```
-- `home-primary` vs `away-secondary (#00fffa)`：`deltaE = 24.24`、`contrast = 1.08`、`hueDiff = 25°`。  
-  動態 DeltaE 門檻降至 21 (`deltaEBreach = false`)，雖然對比偏低，但支援訊號僅 1 個 → **判定不衝突**。
+- `team1-homekit` vs `team2-awaykit (#00fffa)`：`deltaE = 24.24`、`contrast = 1.08`、`hueDiff = 25°`。  
+  動態 DeltaE 門檻降至 21 (`deltaEBreach = false`)，雖然對比偏低，但支援訊號僅 1 個 → **判定不衝突**，並回報 `team2KitUsed = awaykit`。
 
-### 6.2 深綠 vs. 螢光綠
+### 7.2 深綠 vs. 螢光綠
 ```json
 {
-  "home": { "primary": "#586a58" },
-  "away": { "primary": "#648b7d", "secondary": "#238113" }
+  "team1": { "homekit": "#586a58" },
+  "team2": { "homekit": "#648b7d", "awaykit": "#238113" }
 }
 ```
-- `home-primary` vs `away-primary (#648b7d)`：`deltaE = 13.49`、`contrast = 1.53`、`luminanceDiff = 0.096`。  
+- `team1-homekit` vs `team2-homekit (#648b7d)`：`deltaE = 13.49`、`contrast = 1.53`、`luminanceDiff = 0.096`。  
   DeltaE 門檻為 21（亮度 boost），`deltaE` 仍偏低且對比/亮度同時告警 → **判定衝突**。  
-- `home-primary` vs `away-secondary (#238113)`：因屬於「飽和差 65、亮度極近但 hue 9°」的情況，亮度訊號被抑制，支援訊號只有對比一項 → **判定不衝突**。
+- `team1-homekit` vs `team2-awaykit (#238113)`：因屬於「飽和差 65、亮度極近但 hue 9°」的情況，亮度訊號被抑制，支援訊號只有對比一項 → **判定不衝突**，並回報 `team2KitUsed = awaykit`。
 
-### 6.3 亮黃 vs. 青綠
+
+### 7.3 全部組合皆衝突
 ```json
 {
-  "home": { "primary": "#ffff00" },
-  "away": { "primary": "#99ff33", "secondary": "#99ff33" }
+  "team1": { "homekit": "#1a1a1a", "awaykit": "#2a2a2a" },
+  "team2": { "homekit": "#151515", "awaykit": "#202020" }
 }
 ```
-- hue 差 30°，亮度差 0.142 → DeltaE 門檻 18。`deltaE = 16.55 < 18`，但亮度訊號因 hue 差大而被關閉，支援訊號僅對比一項 → **判定不衝突**。
+- `team1-homekit`/`team2-homekit` 亮度差僅 0.01、`deltaE = 4.12`，支援訊號（對比 + 亮度）同時成立 → **衝突**。  
+- 改試 `team2.awaykit` 仍僅是亮度微調，`deltaE = 5.35`、對比不足 → **衝突**。  
+- `team1` 改用 `awaykit` 嘗試所有 `team2` kit 仍無法通過，最終回應範例：
 
-### 6.4 紅 vs. 橘
 ```json
 {
-  "home": { "primary": "#ff3300" },
-  "away": { "primary": "#d86518", "secondary": "#d86518" }
+  "status": "conflict",
+  "message": "All combinations still clash. Please review or adjust colors",
+  "checks": [
+    { "stage": "team1-homekit", "base": { "kit": "homekit", "color": "#1a1a1a" }, "compare": { "kit": "homekit", "color": "#151515" }, "conflict": true, "diagnostics": { "...": "略" } },
+    { "stage": "team1-homekit", "base": { "kit": "homekit", "color": "#1a1a1a" }, "compare": { "kit": "awaykit", "color": "#202020" }, "conflict": true, "diagnostics": { "...": "略" } },
+    { "stage": "team1-alternate", "base": { "kit": "awaykit", "color": "#2a2a2a" }, "compare": { "kit": "homekit", "color": "#151515" }, "conflict": true, "diagnostics": { "...": "略" } },
+    { "stage": "team1-alternate", "base": { "kit": "awaykit", "color": "#2a2a2a" }, "compare": { "kit": "awaykit", "color": "#202020" }, "conflict": true, "diagnostics": { "...": "略" } }
+  ]
 }
 ```
-- hue 差 12°、亮度差 0.003 → DeltaE 門檻 23，`deltaE = 11.34`。  
-  由於「亮度極近但 hue ≥ 10°」觸發保護，`luminanceBreach = false`，支援訊號只有對比 → **判定不衝突**。
+- `checks` 陣列能清楚指出每次嘗試都衝突，方便追蹤需要調整的 kit。
 
 藉由觀察 `checks` 陣列中的 `metrics` 與 `diagnostics`，即可解讀每次判斷是被哪些規則拒絕或放行。
