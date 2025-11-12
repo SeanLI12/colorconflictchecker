@@ -10,7 +10,7 @@ This document is the IT handover guide for determining whether two jersey kits c
 3. Diagnose each pair: check whether DeltaE is below the threshold, contrast is insufficient, hue/saturation are too close, or luminance is nearly identical.
 4. Final rule: treat it as a conflict only when `DeltaE < dynamic threshold` **and** at least two supporting signals (contrast breach, hue & saturation both tight, luminance breach) are present.
 
-
+---
 
 ## 2. Conflict Rules
 1. **DeltaE breach**: compare your computed `deltaE` to the dynamic threshold above.
@@ -30,6 +30,11 @@ This document is the IT handover guide for determining whether two jersey kits c
 ## 3. Example & Rules: Manual Walkthrough (Team1 `#ebeef0` vs Team2 `#00fffa`)
 
 **`threshold.deltaE` defaults to 15, so any `deltaE > 15` means “no conflict.”** (A conflict can only occur if `deltaE` falls *below* the dynamic threshold.)
+
+**Library links**  
+https://github.com/zschuessler/DeltaE  
+https://github.com/Qix-/color-convert
+
 
 1. **Parse the colors**  
    - `#ebeef0` → RGB(235, 238, 240)  
@@ -104,7 +109,7 @@ See `conflictDetect.js` for the production-ready functions.
 
 IT only needs to import `conflictDetect.js` to reuse the logic.
 
-### 6.1 Quick Start (IT must call `analyzeColors`)
+### 5.1 Quick Start (IT must call `analyzeColors`)
 ```js
 import { analyzeColors } from "./conflictDetect.js";
 
@@ -125,7 +130,7 @@ if (summary.status === "ok") {
 }
 ```
 
-### 6.2 IT Operating Guidelines
+### 5.2 IT Operating Guidelines
 1. **Kit decision**  
    - If `summary.status === "ok"`, *immediately* use `summary.team1KitUsed` and `summary.team2KitUsed` (value is always `homekit`, `awaykit`, or `thirdkit`) for that match.  
    - If `summary.status === "conflict"` or `summary` is null/undefined, **do not** display any kit for the match.
@@ -135,7 +140,7 @@ if (summary.status === "ok") {
 
 ---
 
-### 6.3 Recommended Input JSON
+### 5.3 Recommended Input JSON
 ```jsonc
 {
   "team1": {
@@ -159,7 +164,7 @@ Notes:
 - Threshold overrides are for testing; notify the design/standards owner before changing them.
 - **Color-source requirement**: always pass the Competitor Profile API’s kit `base` colors into these fields.
 
-### 6.4 Successful Response Shape (`analyzeColors`)
+### 5.4 Successful Response Shape (`analyzeColors`)
 ```json
 {
   "status": "ok",
@@ -221,9 +226,9 @@ If every combination clashes, `status` becomes `"conflict"` (or `result` is `nul
 
 ---
 
-## 7. Examples
+## 6. Examples
 
-### 7.1 Light Gray vs. Neon Cyan
+### 6.1 Light Gray vs. Neon Cyan
 ```json
 {
   "team1": { "homekit": "#ebeef0" },
@@ -233,7 +238,7 @@ If every combination clashes, `status` becomes `"conflict"` (or `result` is `nul
 `team1-homekit` vs `team2-awaykit (#00fffa)`: `deltaE = 24.24`, `contrast = 1.08`, `hueDiff = 25°`.  
 Dynamic DeltaE threshold drops to 21 (`deltaEBreach = false`). Contrast is low but has only one supporting signal → **no conflict**, `team2KitUsed = awaykit`.
 
-### 7.2 Dark Green vs. Neon Green
+### 6.2 Dark Green vs. Neon Green
 ```json
 {
   "team1": { "homekit": "#586a58" },
@@ -244,7 +249,7 @@ Dynamic DeltaE threshold drops to 21 (`deltaEBreach = false`). Contrast is low b
 Boosted DeltaE threshold is 21, so this pairing **conflicts**.  
 `team1-homekit` vs `team2-awaykit (#238113)`: high saturation gap (65) and slight hue diff (9°) suppress the luminance signal, leaving only contrast → **no conflict**, `team2KitUsed = awaykit`.
 
-### 7.3 All Combinations Clash
+### 6.3 All Combinations Clash
 ```json
 {
   "team1": { "homekit": "#1a1a1a", "awaykit": "#2a2a2a" },
