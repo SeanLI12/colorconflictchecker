@@ -228,4 +228,4 @@ Trying team1’s away kit doesn’t help, so the final response is:
   ]
 }
 ```
-Review the `checks` array to decide which kit colors need adjustment.
+
