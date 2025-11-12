@@ -51,13 +51,17 @@ https://github.com/Qix-/color-convert
      - `hueDiff = min(|204 - 178|, 360 - |204 - 178|) = 26°` (shortest hue distance).  
      - `saturationDiff = |15 - 100| = 85` (difference in saturation).
 
-3. **Dynamic DeltaE threshold (`threshold.deltaE`)**  
-   Rules:  
-   1. `hueDiff < 12° && saturationDiff ≥ 60` → +6  
-   2. `luminanceDiff < 0.05 && hueDiff ≥ 10°` → +6  
-   3. `luminanceDiff < 0.1` → if `hueDiff < 20°` add +10, else +6  
-   4. `luminanceDiff < 0.25 && hueDiff < 28°` → +6  
-   5. `luminanceDiff < 0.4` → +3  
+3. **Dynamic DeltaE threshold (`threshold.deltaE`, `threshold.contrastRatio`)**  
+   `threshold.deltaE` Rules start at 15:  
+      1. `hueDiff < 12° && saturationDiff ≥ 60` → +6  
+      2. `luminanceDiff < 0.05 && hueDiff ≥ 10°` → +6  
+      3. `luminanceDiff < 0.1` → if `hueDiff < 20°` add +10, else +6  
+      4. `luminanceDiff < 0.25 && hueDiff < 28°` → +6  
+      5. `luminanceDiff < 0.4` → +3  
+
+   `threshold.contrastRatio` Rules start at 2.5: 
+      1. `hueDiff < 25° && saturationDiff < 15` → +0.5  
+      2. `hueDiff ≥ 35° && saturationDiff ≥ 40` → −0.7 (not below 1.5)  
 
    **In this example:**  
    - DeltaE: `luminanceDiff < 0.25` and `hueDiff < 28°` → +6; base threshold is 15 → `threshold.deltaE = 21`.  
@@ -65,9 +69,7 @@ https://github.com/Qix-/color-convert
 
 4. **Supporting-signal checks**  
    Rules:  
-   1. Contrast threshold starts at 2.5:  
-      - `hueDiff < 25° && saturationDiff < 15` → +0.5  
-      - `hueDiff ≥ 35° && saturationDiff ≥ 40` → −0.7 (not below 1.5)  
+   1. `threshold.contrastRatio` starts at 2.5:  
    2. Hue & saturation: only when both `hueDiff <= 25` and `saturationDiff <= 15` are true do we count this signal.  
    3. Luminance: check `luminanceDiff < 0.2`. Force it to false if:  
       - high-saturation split (`hueDiff < 12° && saturationDiff ≥ 60`)  
