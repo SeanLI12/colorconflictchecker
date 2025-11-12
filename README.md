@@ -71,7 +71,7 @@ IT only needs to import `conflictDetect.js` to reuse the logic.
 import { analyzeColors } from "./conflictDetect.js";
 
 const payload = {
-  team1: { homekit: "#ebeef0", awaykit: "#7f7f7f" },
+  team1: { homekit: "#ebeef0", awaykit: "#7f7f7f", thirdkit: "#f3c7c7" },
   team2: { homekit: "#e4e4d9", awaykit: "#00fffa", thirdkit: "#c52a2a" },
 };
 
