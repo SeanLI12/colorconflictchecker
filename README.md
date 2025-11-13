@@ -45,11 +45,11 @@ https://github.com/Qix-/color-convert
    - Luminance:  
      - `#ebeef0` becomes `L1 ≈ 0.873`; `#00fffa` becomes `L2 ≈ 0.765` (the relative luminance of each color).  
      - `contrastRatio = (0.873 + 0.05) / (0.765 + 0.05) ≈ 1.08`. The `+0.05` term is WCAG’s constant offset to avoid dividing by zero when luminance is near zero.  
-     - `luminanceDiff = |0.873 - 0.765| = 0.108`.  
+     - `luminanceDiff = Math.abs(0.873 - 0.765) = 0.108`.  
    - HSL:  
      - `#ebeef0` hue ≈ 204°, saturation ≈ 15%; `#00fffa` hue ≈ 178°, saturation ≈ 100% (we now have hue H and saturation S).  
-     - `hueDiff = min(|204 - 178|, 360 - |204 - 178|) = 26°` (shortest hue distance).  
-     - `saturationDiff = |15 - 100| = 85` (difference in saturation).
+     - `hueDiff = min(Math.abs(204 - 178), 360 - Math.abs(204 - 178)) = 26°` (shortest hue distance).  
+     - `saturationDiff = Math.abs(15 - 100) = 85` (difference in saturation).
 
 3. **Dynamic DeltaE threshold (`threshold.deltaE`, `threshold.contrastRatio`)**  
    `threshold.deltaE` Rules start at 15:  
